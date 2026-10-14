@@ -19,3 +19,6 @@ mlartifacts/
 
 .vscode/
 .idea/
+
+mlflow.db     # MLflow tracking database (local)
+artifacts/    # model binaries: stored in MLflow/S3, not Git
