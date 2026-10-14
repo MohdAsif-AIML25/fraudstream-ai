@@ -12,7 +12,7 @@ def frame() -> pd.DataFrame:
 
 def test_no_rows_lost_or_duplicates(frame):
     train,val,test=chronological_split(frame)
-    assert len(train)+len(val)+len(val)+len(test)==len(frame)
+    assert len(train)+len(val)+len(test)==len(frame)
     assert set(train.index).isdisjoint(val.index) and set(val.index).isdisjoint(test.index)
 
 def test_every_split_is_strictly_later_than_the_previous(frame):
@@ -34,4 +34,3 @@ def test_invalid_fractions_are_rejected(frame):
     with pytest.raises(ValueError):
         chronological_split(frame, train_frac=0.9, val_frac=0.2)
 
-        
