@@ -1,0 +1,49 @@
+{
+  "model_version": "fraud_model_v1",
+  "created_at": "2026-10-14T11:59:16.304439+00:00",
+  "feature_columns": [
+    "prior_txn_count_5m",
+    "prior_amount_sum_5m",
+    "seconds_since_previous_txn",
+    "is_new_device",
+    "amount_to_prior_average",
+    "history_available",
+    "hour_of_day_ist",
+    "amount_minor",
+    "merchant_category",
+    "channel"
+  ],
+  "thresholds": {
+    "high": 0.1809685230255127,
+    "medium": 0.07180126011371613
+  },
+  "metrics": {
+    "validation": {
+      "average_precision": 0.975648185968383,
+      "precision": 0.15151515151515152,
+      "recall": 1.0,
+      "flagged_rate": 0.020006736274840013,
+      "tp": 45,
+      "fp": 252,
+      "fn": 0,
+      "tn": 14548
+    },
+    "test": {
+      "average_precision": 0.9546148264195486,
+      "precision": 0.211864406779661,
+      "recall": 1.0,
+      "flagged_rate": 0.02384641293364769,
+      "tp": 75,
+      "fp": 279,
+      "fn": 0,
+      "tn": 14491
+    }
+  },
+  "algorithm": "xgboost",
+  "validation_average_precision": {
+    "logreg": 0.6790406670310821,
+    "xgboost": 0.975648185968383
+  },
+  "train_end": "2026-09-21 21:30:27+00:00",
+  "test_start": "2026-09-26 10:01:39+00:00"
+}
