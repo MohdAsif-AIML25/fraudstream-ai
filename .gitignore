@@ -11,7 +11,7 @@ __pycache__/
 *.key
 *.log
 
-data/
+/data/
 artifacts/
 mlruns/
 mlartifacts/
