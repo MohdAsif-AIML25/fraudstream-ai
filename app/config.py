@@ -22,6 +22,14 @@ class Settings(BaseSettings):
     # Day 4: where the Kafka broker listens (host side of docker-compose)
     kafka_bootstrap_servers: str = "127.0.0.1:9092"
 
+    # scoring worker 
+    consumer_group: str = "fraud-scorer"   # all worker copies share this name -> Kafka splits partitions between them
+    model_path: str = "artifacts/fraud_model_v1.joblib"          # binary (gitignored)
+    model_meta_path: str = "artifacts_meta/fraud_model_v1.json"  # features + thresholds (committed)
+    history_ttl_days: int = 30             # Redis forgets an account that has been silent for 30 days
+
+
+    
     @property
     def postgres_dsn(self) -> str:
         """Build the connection URL. Credentials are percent-encoded so characters

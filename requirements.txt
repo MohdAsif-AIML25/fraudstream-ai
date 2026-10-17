@@ -23,3 +23,6 @@ sqlalchemy>=2.0
 confluent-kafka>=2.5
 httpx>=0.27 # needed by FastAPI's TestClient and the replay script
 
+# Day 5
+alembic>=1.13
+fakeredis>=2.23      # in-memory Redis for tests
