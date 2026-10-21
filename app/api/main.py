@@ -3,7 +3,7 @@
 Run:   uvicorn app.api.main:app --reload
 Docs:  http://127.0.0.1:8000/docs
 
-Endpoints (Day 4):
+Endpoints:
   POST /transactions        validate, store, publish to Kafka -> 202 Accepted (NOT scored yet)
   GET  /transactions/{id}   lifecycle status (+ score after Day 5)
   GET  /health              are the database and Kafka reachable?
@@ -22,7 +22,6 @@ from app.db.models import TransactionRecord
 from app.schemas import Transaction
 from app.streaming.producer import Publisher, PublishError
 
-
 def create_app(session_factory: sessionmaker | None = None, publisher: Publisher | None = None) -> FastAPI:
     """App factory. Tests pass a SQLite session factory and a fake publisher;
     in production both are None and are built from .env at startup."""
@@ -33,7 +32,7 @@ def create_app(session_factory: sessionmaker | None = None, publisher: Publisher
         if session_factory is None:
             # Imported here so tests never need a real Postgres or Kafka.
             from app.config import get_settings
-            from app.db.session import create_tables, make_engine, make_session_factory
+            from app.db.session import make_engine, make_session_factory
             from app.streaming.producer import KafkaPublisher
 
             settings = get_settings()
@@ -47,7 +46,7 @@ def create_app(session_factory: sessionmaker | None = None, publisher: Publisher
         yield
         app.state.publisher.close()  # flush buffered messages on shutdown
 
-    app = FastAPI(title="FraudStream AI", version="0.4.0", lifespan=lifespan)
+    app = FastAPI(title="FraudStream AI", version="0.5.0", lifespan=lifespan)
 
     # ---------- dependencies: FastAPI calls these and injects the results ----------
 
