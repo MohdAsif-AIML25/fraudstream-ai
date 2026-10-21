@@ -38,6 +38,7 @@ class TransactionRecord(Base):
     risk_band: Mapped[str | None] = mapped_column(String(8), nullable=True)
     model_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Day 5: the EXACT feature values the model saw. Answers "why was this flagged?" months later,
     features: Mapped[dict |None]=mapped_column(JSON,nullable=True)
 
 class ReviewCase(Base):
@@ -56,7 +57,7 @@ class ReviewCase(Base):
     risk_score: Mapped[float] = mapped_column(Float)  # copied so the queue can be sorted without a join
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
-    # Filled when an analyst decides (Day 6).
+    # Filled when an analyst decides.
     analyst: Mapped[str | None] = mapped_column(String(64), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
