@@ -1,0 +1,9 @@
+# Load every dashboard JSON from this folder at startup ("dashboards as code").
+apiVersion: 1
+providers:
+  - name: fraudstream
+    folder: FraudStream
+    type: file
+    allowUiUpdates: true      # you may edit in the UI, but export back to JSON to keep the change
+    options:
+      path: /var/lib/grafana/dashboards

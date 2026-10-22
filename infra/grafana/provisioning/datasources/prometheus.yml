@@ -1,0 +1,9 @@
+# Grafana reads this at startup: no clicking in the UI to add the data source.
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: prometheus           # fixed uid: the dashboard JSON refers to it
+    type: prometheus
+    access: proxy             # Grafana's server (not your browser) calls Prometheus
+    url: http://prometheus:9090   # service name from docker-compose = hostname on the Docker network
+    isDefault: true
