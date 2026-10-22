@@ -45,6 +45,7 @@ class ProcessResult:
     result: ScoreResult | None = None
     reason: str | None = None        # why it went to the DLQ (written to the worker log)
     features: dict = field(default_factory=dict)
+    queue_seconds: float | None = None  # Day 6: API acceptance -> score saved (for monitoring)
 
 
 def to_event(txn: Transaction) -> Event:
@@ -82,14 +83,16 @@ class TransactionProcessor:
             result = self._scorer.score(txn, features)
 
             # 6) Save everything in ONE commit: score and review case appear together or not at all.
-            self._save(session, record, features, result)
+            scored_at = self._save(session, record, features, result)
+            queue_seconds = (scored_at - _as_utc(record.received_at)).total_seconds()
 
         # 7) Only after the commit succeeded.
         self._store.add(txn.account_id, txn.transaction_id, event)
-        return ProcessResult(Outcome.SCORED, txn.transaction_id, result, features=features)
+        return ProcessResult(Outcome.SCORED, txn.transaction_id, result, features=features,
+                             queue_seconds=queue_seconds)
 
     @staticmethod
-    def _save(session: Session, record: TransactionRecord, features: dict, result: ScoreResult) -> None:
+    def _save(session: Session, record: TransactionRecord, features: dict, result: ScoreResult) -> datetime:
         now = datetime.now(timezone.utc)
         record.status = STATUS_SCORED
         record.risk_score = result.score
@@ -103,3 +106,9 @@ class TransactionProcessor:
             session.merge(ReviewCase(transaction_id=record.transaction_id, status=REVIEW_OPEN,
                                      risk_score=result.score, created_at=now))
         session.commit()
+        return now
+
+
+def _as_utc(value: datetime) -> datetime:
+    """Postgres returns timezone-aware datetimes; SQLite (tests) returns naive ones in UTC."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)

@@ -11,9 +11,11 @@ Run:  python -m app.worker.main
 
 import logging
 import signal
+import time
 
 from confluent_kafka import Consumer, KafkaError, Message
 
+from app.monitoring.metrics import QUEUE_TO_SCORE, RISK_BANDS, RISK_SCORE, WORKER_MESSAGES, WORKER_PROCESSING
 from app.streaming.producer import Publisher
 from app.streaming.topics import DLQ_TOPIC, RAW_TOPIC
 from app.worker.processor import Outcome, ProcessResult, TransactionProcessor
@@ -44,7 +46,10 @@ class ScoringWorker:
         self._running = False
 
     def handle(self, msg: Message) -> ProcessResult:
+        start = time.perf_counter()
         result = self._processor.process(msg.value())
+        WORKER_PROCESSING.observe(time.perf_counter() - start)
+        self._record_metrics(result)
 
         if result.outcome is Outcome.DEAD_LETTER:
             # Keep the ORIGINAL bytes so someone can inspect and replay it later; the reason goes to the log.
@@ -59,6 +64,16 @@ class ScoringWorker:
         # asynchronous=False: wait until Kafka stored the new offset before taking the next message.
         self._consumer.commit(message=msg, asynchronous=False)
         return result
+
+    @staticmethod
+    def _record_metrics(result: ProcessResult) -> None:
+        """Day 6: numbers for Prometheus. Only cheap in-memory increments, no I/O."""
+        WORKER_MESSAGES.labels(outcome=result.outcome.value).inc()
+        if result.outcome is Outcome.SCORED:
+            RISK_SCORE.observe(result.result.score)           # score distribution -> drift
+            RISK_BANDS.labels(band=result.result.band).inc()  # high-risk rate -> alert
+            if result.queue_seconds is not None:
+                QUEUE_TO_SCORE.observe(max(result.queue_seconds, 0.0))
 
     def run(self) -> None:
         signal.signal(signal.SIGINT, self.stop)   # Ctrl+C

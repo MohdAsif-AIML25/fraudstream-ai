@@ -11,6 +11,8 @@ import logging
 from datetime import timedelta
 
 from redis import Redis
+from prometheus_client import start_http_server
+
 
 from app.config import get_settings
 from app.db.session import make_engine, make_session_factory
@@ -37,6 +39,10 @@ def main() -> None:
 
     session_factory = make_session_factory(make_engine(settings.sqlalchemy_url))
     processor = TransactionProcessor(session_factory, store, scorer)
+
+    # Day 6: serve /metrics on a background thread so Prometheus can scrape the worker.
+    start_http_server(settings.worker_metrics_port, addr=settings.worker_metrics_host)
+    logging.info("metrics on http://%s:%s/metrics", settings.worker_metrics_host, settings.worker_metrics_port)
 
     worker = ScoringWorker(
         consumer=make_consumer(settings.kafka_bootstrap_servers, settings.consumer_group),
