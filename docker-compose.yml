@@ -56,8 +56,7 @@ services:
       timeout: 10s
       retries: 10
 
-
-    prometheus:
+  prometheus:
     image: prom/prometheus:v3.5.0           # pinned version (3.5 is a long-term-support release)
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -91,7 +90,7 @@ volumes:
   redis_data:
   prometheus_data:
   grafana_data:
-  
+
 
 
     
