@@ -27,7 +27,11 @@ class Settings(BaseSettings):
     model_path: str = "artifacts/fraud_model_v1.joblib"          # binary (gitignored)
     model_meta_path: str = "artifacts_meta/fraud_model_v1.json"  # features + thresholds (committed)
     history_ttl_days: int = 30             # Redis forgets an account that has been silent for 30 days
-
+    # monitoring
+    worker_metrics_port: int = 8001        # Prometheus scrapes the worker here (the API serves /metrics on :8000)
+    # 127.0.0.1 = only this machine. If Prometheus (in Docker) shows the target DOWN with
+    # "connection refused", set WORKER_METRICS_HOST=0.0.0.0 in .env (and run uvicorn with --host 0.0.0.0).
+    worker_metrics_host: str = "127.0.0.1"
 
     
     @property
