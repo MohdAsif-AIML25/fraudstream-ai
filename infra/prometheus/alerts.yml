@@ -1,0 +1,54 @@
+# Alert rules. Each alert answers ONE question an on-call engineer would ask.
+# 'for:' = the condition must stay true this long before firing (avoids alerts on short blips).
+# See docs/runbook.md for what to do when each alert fires.
+
+groups:
+  - name: fraudstream
+    rules:
+      - alert: FraudstreamWorkerDown
+        expr: up{job="fraudstream-worker"} == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "Scoring worker is down: transactions are queued but not scored"
+
+      - alert: FraudstreamApiDown
+        expr: up{job="fraudstream-api"} == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "API is down: clients cannot submit transactions"
+
+      - alert: FraudstreamDeadLetters
+        expr: sum(increase(fraudstream_worker_messages_total{outcome="dead_letter"}[5m])) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "Messages were sent to the dead-letter queue in the last 5 minutes"
+
+      - alert: FraudstreamApiErrorRateHigh
+        expr: |
+          sum(rate(fraudstream_http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(fraudstream_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "More than 5% of API requests fail with 5xx"
+
+      - alert: FraudstreamScoringSlow
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(fraudstream_queue_to_score_seconds_bucket[5m]))) > 5
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "p95 time from acceptance to score is above 5 s (worker falling behind)"
+
+      # ML alert: the model chose thresholds so ~2% of traffic is "high".
+      # 3x that for 10 minutes means drift, a data bug, or a real attack.
+      - alert: FraudstreamHighRiskRateAbnormal
+        expr: |
+          sum(rate(fraudstream_risk_band_total{band="high"}[10m]))
+            / sum(rate(fraudstream_risk_band_total[10m])) > 0.06
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "High-risk rate is {{ $value | humanizePercentage }} (budget is about 2%)"
