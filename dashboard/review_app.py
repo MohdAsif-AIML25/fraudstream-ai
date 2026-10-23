@@ -8,15 +8,19 @@ The dashboard talks ONLY to the API (never directly to Postgres). Why?
   - the API owns the rules (a case is decided once, decisions are validated)
   - the dashboard needs no database password
   - the same endpoints could serve a mobile app or a CLI later
+
+Live: with "Live updates" on, new high-risk alerts appear by themselves within a few seconds.
 """
 
 import os
+from datetime import datetime
 
 import httpx
 import pandas as pd
 import streamlit as st
 
 API_URL = os.getenv("FRAUDSTREAM_API_URL", "http://127.0.0.1:8000")
+LIVE_SECONDS = 5  # how often the page checks for new alerts
 
 st.set_page_config(page_title="FraudStream review queue", page_icon="🛡️", layout="wide")
 st.title("🛡️ FraudStream review queue")
@@ -30,6 +34,15 @@ def fetch_open_cases() -> list[dict] | None:
     except httpx.HTTPError as exc:
         st.error(f"Cannot reach the API at {API_URL} ({type(exc).__name__}). Is uvicorn running?")
         return None
+
+
+def fetch_feedback_summary() -> list[dict]:
+    try:
+        r = httpx.get(f"{API_URL}/reviews/summary", timeout=5)
+        r.raise_for_status()
+        return r.json()
+    except httpx.HTTPError:
+        return []  # the queue matters more than the stats: never block the page on this
 
 
 def send_decision(transaction_id: str, decision: str, analyst: str, note: str) -> None:
@@ -54,12 +67,42 @@ if "flash" in st.session_state:  # show (once) the result of the last decision
 
 analyst = st.sidebar.text_input("Analyst name", value=st.session_state.get("analyst", ""))
 st.session_state["analyst"] = analyst
+live = st.sidebar.toggle("Live updates", value=True, help=f"Check for new alerts every {LIVE_SECONDS} s")
 if st.sidebar.button("Refresh"):
     st.rerun()
 
 cases = fetch_open_cases()
 if cases is None:
     st.stop()  # API is down: show the error above, nothing else
+
+
+@st.fragment(run_every=LIVE_SECONDS if live else None)
+def watch_for_new_alerts(shown_ids: frozenset[str]) -> None:
+    """Runs again on its own every LIVE_SECONDS. It redraws the WHOLE page only when the set of
+    open alerts changed, so a refresh that found nothing new never wipes the note being typed."""
+    try:
+        r = httpx.get(f"{API_URL}/reviews", params={"status": "open", "limit": 100}, timeout=5)
+        r.raise_for_status()
+        latest = frozenset(c["transaction_id"] for c in r.json())
+    except httpx.HTTPError:
+        st.caption("Live updates paused: API not reachable.")
+        return
+    if latest != shown_ids:
+        st.rerun()  # new alert arrived (or another analyst closed one)
+    st.caption(f"{'🟢 Live' if live else '⏸ Paused'} · checked {datetime.now():%H:%M:%S}")
+
+
+watch_for_new_alerts(frozenset(c["transaction_id"] for c in cases))
+
+with st.sidebar:
+    st.subheader("Model precision")
+    st.caption("From analyst decisions: of the alerts checked, how many were real fraud.")
+    summary = fetch_feedback_summary()
+    if summary:
+        st.dataframe(pd.DataFrame(summary)[["model_version", "decided", "confirmed_fraud", "precision"]],
+                     hide_index=True, column_config={"precision": st.column_config.NumberColumn(format="%.2f")})
+    else:
+        st.caption("No decisions yet.")
 
 st.metric("Open cases", len(cases))
 if not cases:

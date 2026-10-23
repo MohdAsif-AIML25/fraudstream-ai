@@ -61,3 +61,23 @@ def test_analyst_confirms_fraud(api, session_factory):  # noqa: F811
     decided = api.get("/reviews", params={"status": "confirmed_fraud"}).json()
     assert decided[0]["analyst"] == "asif"
     assert at.metric[0].value == "1"
+
+
+def test_live_updates_and_feedback_precision_are_shown(api, session_factory):  # noqa: F811
+    add_case(session_factory, "txn_top", 0.97)
+    add_case(session_factory, "txn_low", 0.40)
+    api.post("/reviews/txn_low/decision", json={"decision": "legitimate", "analyst": "asif"})
+
+    at = AppTest.from_file(APP, default_timeout=30).run()
+    assert not at.exception
+    assert any("Live" in c.value for c in at.caption)               # live watcher is running
+    precision = at.sidebar.dataframe[0].value
+    assert precision.loc[0, "decided"] == 1 and precision.loc[0, "precision"] == 0.0
+
+
+def test_live_updates_can_be_paused(api, session_factory):  # noqa: F811
+    add_case(session_factory, "txn_top", 0.97)
+    at = AppTest.from_file(APP, default_timeout=30).run()
+    at.sidebar.toggle[0].set_value(False).run()
+    assert not at.exception
+    assert any("Paused" in c.value for c in at.caption)
