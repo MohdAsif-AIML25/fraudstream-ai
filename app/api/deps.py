@@ -4,7 +4,6 @@ because the review router needs the same database session)."""
 
 from collections.abc import Iterator
 from fastapi import Request 
-from flask import session
 from sqlalchemy.orm import Session 
 from app.streaming.producer import Publisher 
 
