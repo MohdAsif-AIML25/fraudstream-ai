@@ -1,0 +1,32 @@
+# Production overrides for a small cloud server. Used TOGETHER with docker-compose.yml:
+#     COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml     (put this line in the server's .env)
+#
+# Compose merges the two files: values here are ADDED to (or replace) the base file.
+# Nothing here is needed on your laptop.
+
+x-logging: &logging                     # without limits, container logs grow until the disk is full
+  driver: json-file
+  options:
+    max-size: "10m"                     # rotate each log file at 10 MB
+    max-file: "3"                       # keep 3 files -> at most 30 MB per service
+
+services:
+  kafka:
+    environment:
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"   # Kafka's JVM takes 1 GB by default; too much for a 4 GB server
+    logging: *logging
+
+  postgres:
+    logging: *logging
+  redis:
+    logging: *logging
+  prometheus:
+    logging: *logging
+  grafana:
+    logging: *logging
+  api:
+    logging: *logging
+  worker:
+    logging: *logging
+  dashboard:
+    logging: *logging
