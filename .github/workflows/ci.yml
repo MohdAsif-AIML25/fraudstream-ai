@@ -1,0 +1,45 @@
+# Continuous Integration: GitHub runs this on every push and pull request.
+# A red ❌ next to a commit on GitHub = something broke; a green ✅ = tests pass on a CLEAN machine
+# (not just "works on my laptop").
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"          # same version as the Dockerfile and your laptop
+          cache: pip                      # reuse downloaded packages between runs (faster)
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest -q                    # unit tests use SQLite + fakeredis + fakes: no Docker needed
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: tests                          # only build the image if the tests passed
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml
+        run: |
+          cp .env.example .env            # compose refuses to start without the required variables
+          docker compose config --quiet
+
+      - name: Build the image
+        run: docker build -t fraudstream-ai:ci .
+
+      - name: Image can import every service
+        run: |
+          docker run --rm fraudstream-ai:ci python -c "import app.api.main, app.worker.main, xgboost; print('imports ok')"
