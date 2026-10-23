@@ -1,7 +1,11 @@
 """Stage 6a: train the stronger candidate (XGBoost) with early stopping; log to MLflow.
 
 Run from project root:  python -m scripts.train_xgboost
+Train a challenger:     python -m scripts.train_xgboost --name xgboost_v2 --max-depth 6
+                        (then compare it: python -m scripts.compare_models --candidate artifacts/xgboost_v2.joblib)
 """
+
+import argparse
 
 import joblib
 import mlflow
@@ -27,6 +31,13 @@ PARAMS = {
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--name", default="xgboost", help="saved as artifacts/<name>.joblib")
+    parser.add_argument("--max-depth", type=int, default=PARAMS["max_depth"])
+    parser.add_argument("--learning-rate", type=float, default=PARAMS["learning_rate"])
+    args = parser.parse_args()
+    params = {**PARAMS, "max_depth": args.max_depth, "learning_rate": args.learning_rate}
+
     train, val, test = load_splits()
     X_train, y_train = split_xy(train)
     X_val, y_val = split_xy(val)
@@ -36,7 +47,7 @@ def main() -> None:
 
     # Fit preprocessing on TRAIN only, then transform validation with the same fitted encoder.
     prep = build_preprocessor_for_trees().fit(X_train)
-    model = XGBClassifier(**PARAMS, scale_pos_weight=scale_pos_weight)
+    model = XGBClassifier(**params, scale_pos_weight=scale_pos_weight)
     model.fit(prep.transform(X_train), y_train,
               eval_set=[(prep.transform(X_val), y_val)], verbose=False)
 
@@ -44,20 +55,20 @@ def main() -> None:
     pipeline = Pipeline([("prep", prep), ("model", model)])
 
     start_tracking("fraudstream-models")
-    with mlflow.start_run(run_name="xgboost"):
+    with mlflow.start_run(run_name=args.name):
         scores = pipeline.predict_proba(X_val)[:, 1]
         threshold = threshold_for_budget(scores, REVIEW_BUDGET)
         metrics = evaluate(y_val, scores, threshold)
         metrics.update(single_row_latency_ms(pipeline, X_val))
         metrics["best_iteration"] = int(model.best_iteration)
 
-        mlflow.log_params({**PARAMS, "scale_pos_weight": round(scale_pos_weight, 1),
+        mlflow.log_params({**params, "scale_pos_weight": round(scale_pos_weight, 1),
                            "review_budget": REVIEW_BUDGET, "threshold": round(threshold, 4)})
         mlflow.set_tags(dataset_tags(train, val, test))
         mlflow.log_metrics(metrics)
 
         ARTIFACT_DIR.mkdir(exist_ok=True)
-        path = ARTIFACT_DIR / "xgboost.joblib"
+        path = ARTIFACT_DIR / f"{args.name}.joblib"
         joblib.dump(pipeline, path)
         mlflow.log_artifact(str(path))
 

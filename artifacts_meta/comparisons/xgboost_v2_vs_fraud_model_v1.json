@@ -1,0 +1,97 @@
+{
+  "deployed": {
+    "model_version": "fraud_model_v1",
+    "feature_columns": [
+      "prior_txn_count_5m",
+      "prior_amount_sum_5m",
+      "seconds_since_previous_txn",
+      "is_new_device",
+      "amount_to_prior_average",
+      "history_available",
+      "hour_of_day_ist",
+      "amount_minor",
+      "merchant_category",
+      "channel"
+    ],
+    "threshold": 0.1809685230255127,
+    "pr_auc": 0.9546148264195486,
+    "recall_at_fpr": 0.9866666666666667,
+    "precision": 0.211864406779661,
+    "recall": 1.0,
+    "flagged_rate": 0.02384641293364769,
+    "total_cost_minor": 1770000,
+    "fraud_caught_minor": 48204051,
+    "latency_p95_ms": 7.3579100044298675
+  },
+  "candidate": {
+    "model_version": "xgboost_v2",
+    "feature_columns": [
+      "prior_txn_count_5m",
+      "prior_amount_sum_5m",
+      "seconds_since_previous_txn",
+      "is_new_device",
+      "amount_to_prior_average",
+      "history_available",
+      "hour_of_day_ist",
+      "amount_minor",
+      "merchant_category",
+      "channel"
+    ],
+    "threshold": 0.05588025227189064,
+    "pr_auc": 0.9568531363828588,
+    "recall_at_fpr": 0.9733333333333334,
+    "precision": 0.2148997134670487,
+    "recall": 1.0,
+    "flagged_rate": 0.02350959919164702,
+    "total_cost_minor": 1745000,
+    "fraud_caught_minor": 48204051,
+    "latency_p95_ms": 7.541929996659745
+  },
+  "gate": {
+    "max_pr_auc_drop": 0.005,
+    "max_recall_drop": 0.01,
+    "min_pr_auc_gain": 0.005,
+    "max_flagged_rate": 0.03,
+    "max_latency_p95_ms": 50.0,
+    "max_fpr": 0.01
+  },
+  "costs": {
+    "review_cost_minor": 5000,
+    "chargeback_fee_minor": 50000
+  },
+  "test_rows": 14845,
+  "test_fraud": 75,
+  "promote": false,
+  "checks": [
+    {
+      "name": "feature contract",
+      "passed": true,
+      "detail": "candidate uses the columns the worker builds"
+    },
+    {
+      "name": "PR-AUC not worse",
+      "passed": true,
+      "detail": "0.9569 vs 0.9546 (tolerance 0.005)"
+    },
+    {
+      "name": "recall @ 1% FPR not worse",
+      "passed": false,
+      "detail": "0.973 vs 0.987 (tolerance 0.01)"
+    },
+    {
+      "name": "analyst workload",
+      "passed": true,
+      "detail": "flags 2.35% of traffic (limit 3%)"
+    },
+    {
+      "name": "latency",
+      "passed": true,
+      "detail": "p95 7.5 ms (limit 50 ms)"
+    },
+    {
+      "name": "better on cost or PR-AUC",
+      "passed": true,
+      "detail": "cost \u20b917,450 vs \u20b917,700; PR-AUC gain +0.0022 (needs +0.005)"
+    }
+  ]
+}
