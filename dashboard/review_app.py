@@ -33,9 +33,13 @@ def fetch_open_cases() -> list[dict] | None:
 
 
 def send_decision(transaction_id: str, decision: str, analyst: str, note: str) -> None:
-    r = httpx.post(f"{API_URL}/reviews/{transaction_id}/decision",
-                   json={"decision": decision, "analyst": analyst, "note": note or None}, timeout=5)
     # Saved in session_state because st.rerun() below redraws the page and would erase a normal message.
+    try:
+        r = httpx.post(f"{API_URL}/reviews/{transaction_id}/decision",
+                       json={"decision": decision, "analyst": analyst, "note": note or None}, timeout=5)
+    except httpx.HTTPError as exc:  # API went down between loading the queue and clicking
+        st.session_state["flash"] = ("error", f"Decision NOT saved: cannot reach the API ({type(exc).__name__}).")
+        return
     if r.status_code == 409:
         st.session_state["flash"] = ("warning", "Another analyst already decided this case.")
     elif r.is_success:
