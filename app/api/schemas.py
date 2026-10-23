@@ -58,4 +58,15 @@ class DecisionRequest(BaseModel):
 
     decision: Literal["confirmed_fraud", "legitimate"]
     analyst: str = Field(min_length=1, max_length=64)
-    note: str | None = Field(default=None, max_length=500)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class FeedbackSummary(BaseModel):
+    """Analyst decisions per model version: the model's real-world precision on alerts."""
+
+    model_version: str
+    open: int
+    confirmed_fraud: int
+    legitimate: int
+    decided: int
+    precision: float | None   # None until at least one case is decided

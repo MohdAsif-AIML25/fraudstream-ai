@@ -89,3 +89,21 @@ def test_invalid_decisions_are_rejected(client, session_factory, body):
 
 def test_invalid_status_filter_is_rejected(client):
     assert client.get("/reviews", params={"status": "everything"}).status_code == 422
+
+
+def test_summary_turns_decisions_into_precision_per_model(client, session_factory):
+    for txn_id in ("txn_a", "txn_b", "txn_c", "txn_open"):
+        add_case(session_factory, txn_id, 0.9)
+    decide(client, "txn_a", "confirmed_fraud")
+    decide(client, "txn_b", "confirmed_fraud")
+    decide(client, "txn_c", "legitimate")
+
+    assert client.get("/reviews/summary").json() == [{
+        "model_version": "fraud_model_v1", "open": 1, "confirmed_fraud": 2, "legitimate": 1,
+        "decided": 3, "precision": pytest.approx(2 / 3),
+    }]
+
+
+def test_summary_without_decisions_has_no_precision(client, session_factory):
+    add_case(session_factory, "txn_1", 0.9)
+    assert client.get("/reviews/summary").json()[0]["precision"] is None

@@ -2,6 +2,7 @@
 
   GET  /reviews?status=open&limit=50          riskiest cases first
   POST /reviews/{transaction_id}/decision     confirmed_fraud | legitimate  (once per case)
+  GET  /reviews/summary                       analyst feedback -> precision per model version
 
 Why do decisions matter for ML? Each decision is a REAL label. Over time these labels
 (1) measure the model's real precision, and (2) become training data for model v2.
@@ -11,8 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_session
-from app.api.review_service import CaseAlreadyDecided, CaseNotFound, decide, list_cases
-from app.api.schemas import DecisionRequest, ReviewCaseResponse
+from app.api.review_service import CaseAlreadyDecided, CaseNotFound, decide, feedback_summary, list_cases
+from app.api.schemas import DecisionRequest, FeedbackSummary, ReviewCaseResponse
 from app.db.models import REVIEW_CONFIRMED_FRAUD, REVIEW_LEGITIMATE, REVIEW_OPEN, ReviewCase, TransactionRecord
 from app.monitoring.metrics import REVIEW_DECISIONS
 
@@ -39,6 +40,11 @@ def get_reviews(
     session: Session = Depends(get_session),
 ) -> list[ReviewCaseResponse]:
     return [_to_response(case, txn) for case, txn in list_cases(session, status_filter, limit)]
+
+
+@router.get("/summary", response_model=list[FeedbackSummary])
+def get_summary(session: Session = Depends(get_session)) -> list[FeedbackSummary]:
+    return [FeedbackSummary(**row) for row in feedback_summary(session)]
 
 
 @router.post("/{transaction_id}/decision", response_model=ReviewCaseResponse)

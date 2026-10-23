@@ -6,10 +6,10 @@ Rule 2: a case is decided ONCE. If two analysts click at the same moment, exactl
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from app.db.models import REVIEW_OPEN, ReviewCase, TransactionRecord
+from app.db.models import REVIEW_CONFIRMED_FRAUD, REVIEW_LEGITIMATE, REVIEW_OPEN, ReviewCase, TransactionRecord
 
 
 class CaseNotFound(Exception):
@@ -47,4 +47,29 @@ def decide(session: Session, transaction_id: str, decision: str, analyst: str, n
             raise CaseNotFound(transaction_id)
         raise CaseAlreadyDecided(transaction_id)
     session.commit()
-    return session.get(ReviewCase, transaction_id)
+    return session.get(ReviewCase, transaction_id)
+
+
+def feedback_summary(session: Session) -> list[dict]:
+    """Investigator feedback turned into model evaluation, per model version.
+
+    precision = confirmed_fraud / decided: of the alerts analysts checked, how many were real fraud.
+    It only covers HIGH-band transactions (only those become cases), so it says nothing about recall.
+    """
+    counts = session.execute(
+        select(TransactionRecord.model_version, ReviewCase.status, func.count())
+        .join(TransactionRecord, TransactionRecord.transaction_id == ReviewCase.transaction_id)
+        .group_by(TransactionRecord.model_version, ReviewCase.status)
+    ).all()
+    by_model: dict[str, dict[str, int]] = {}
+    for model_version, status, n in counts:
+        by_model.setdefault(model_version or "unknown", {})[status] = n
+
+    summary = []
+    for model_version, c in sorted(by_model.items()):
+        fraud, legit = c.get(REVIEW_CONFIRMED_FRAUD, 0), c.get(REVIEW_LEGITIMATE, 0)
+        decided = fraud + legit
+        summary.append({"model_version": model_version, "open": c.get(REVIEW_OPEN, 0),
+                        "confirmed_fraud": fraud, "legitimate": legit, "decided": decided,
+                        "precision": fraud / decided if decided else None})
+    return summary
