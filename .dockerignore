@@ -1,0 +1,27 @@
+# .dockerignore: what NOT to send into the Docker build.
+# Smaller build context = faster builds; and secrets/data never end up inside an image.
+
+.git/
+.github/
+.venv/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+
+# secrets: the container gets settings from docker compose, never from a baked-in .env
+.env
+
+# big or local-only files
+data/
+mlruns/
+mlflow.db
+notebooks/
+
+# the model binary is MOUNTED at runtime (see docker-compose.yml), not copied into the image
+artifacts/
+
+# not needed to run the services
+tests/
+docs/
+infra/
+*.md
