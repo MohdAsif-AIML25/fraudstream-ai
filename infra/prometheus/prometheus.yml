@@ -1,32 +1,24 @@
 # Prometheus configuration: WHAT to scrape and HOW OFTEN.
-# Prometheus runs in Docker; the API and worker run on your laptop (the host).
-# host.docker.internal = "the host machine" as seen from inside a container.
+# Day 7: the API and worker run in Docker too, so Prometheus reaches them by SERVICE NAME
+# on the shared Docker network (api:8000, worker:8001), not via host.docker.internal.
 
 global:
   scrape_interval: 15s       # fetch /metrics every 15 seconds
   evaluation_interval: 15s   # check alert rules every 15 seconds
 
-
 rule_files:
-   -/etc/prometheus/alerts.yml 
-
+  - /etc/prometheus/alerts.yml
 
 scrape_configs:
   - job_name: fraudstream-api
     metrics_path: /metrics
     static_configs:
-      - targets: ["host.docker.internal:8000"]
+      - targets: ["api:8000"]
 
   - job_name: fraudstream-worker
     static_configs:
-      - targets: ["host.docker.internal:8000"]
-
-  - job_name: fraudstream-worker
-    static_configs:
-      - targets: ["host.docker.internal:8001"]
+      - targets: ["worker:8001"]
 
   - job_name: prometheus     # Prometheus monitors itself (useful to see scrape problems)
     static_configs:
       - targets: ["localhost:9090"]
-
-      
