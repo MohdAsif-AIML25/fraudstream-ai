@@ -1,0 +1,11 @@
+# Everything for your laptop and CI: the runtime libraries + training + tests.
+#     pip install -r requirements-dev.txt
+-r requirements.txt
+
+# data + training (scripts/generate_dataset.py ... scripts/select_model.py)
+pyarrow>=15.0               # parquet files in data/
+mlflow>=2.14                # experiment tracking (mlflow.db)
+
+# tests
+pytest>=8.0
+fakeredis>=2.23             # in-memory Redis for tests

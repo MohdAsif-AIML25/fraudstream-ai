@@ -19,9 +19,10 @@ jobs:
         with:
           python-version: "3.12"          # same version as the Dockerfile and your laptop
           cache: pip                      # reuse downloaded packages between runs (faster)
+          cache-dependency-path: requirements*.txt
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-dev.txt   # runtime + training + test tools
 
       - name: Run tests
         run: pytest -q                    # unit tests use SQLite + fakeredis + fakes: no Docker needed
