@@ -4,8 +4,10 @@
 
 Real-time fraud detection for payment transactions: a FastAPI service accepts transactions,
 Kafka queues them, a scoring worker computes behavioural features from Redis and scores them with
-an XGBoost model, high-risk cases go to an analyst review queue, and Prometheus + Grafana monitor
-the service, the pipeline **and the model**. Runs with one command in Docker; deployed on AWS EC2.
+an XGBoost model, high-risk alerts appear on a **live** analyst dashboard, analyst decisions flow back as
+model evaluation, and Prometheus + Grafana monitor the service, the pipeline **and the model**. A candidate
+model must beat the deployed one through a **champion-vs-challenger gate** before it can be promoted.
+Runs with one command in Docker; deployed on AWS EC2.
 
 ## Architecture
 
@@ -18,13 +20,17 @@ flowchart LR
     W <-->|account history| R[(Redis<br/>feature store)]
     W -->|XGBoost score + band| PG
     W -->|high risk| RQ[Review queue]
-    RQ --> D[Streamlit<br/>analyst dashboard]
-    D -->|decision| API
+    RQ -->|live, every 5 s| D[Streamlit<br/>analyst dashboard]
+    D -->|decision = label| API
+    API -->|precision per model version| D
     API -.metrics.-> P[Prometheus]
     W -.metrics.-> P
     P --> G[Grafana]
     K -.bad messages.-> DLQ[[Dead-letter queue]]
 ```
+
+**Workflow:** replay transactions → validate (Pydantic contract) → features (Redis) → score (XGBoost) →
+threshold (risk band) → alert (review case) → investigator decision → model evaluation (`GET /reviews/summary`).
 
 **Request lifecycle:** `received` → `queued` (API returns **202**) → `scored` (worker) → reviewed (analyst, if high risk).
 
@@ -41,9 +47,24 @@ flowchart LR
 Only the selected model is evaluated on the test set, once, after thresholds were frozen on validation.
 At the *high* threshold, 21 % of flagged test transactions are fraud (75 of 354) — the price of catching all of it.
 
+| Deployed model on the test set (14,845 txns, 75 fraud) | Value |
+|---|---|
+| PR-AUC | 0.955 |
+| Recall at 1 % false-positive rate | 0.987 |
+| Estimated fraud cost (missed fraud + ₹500 chargeback each + ₹50 per review) | ₹17,700 |
+| Fraud amount caught by the review queue | ₹4,82,041 |
+| Model latency, one transaction (laptop CPU) | p95 7–15 ms across runs |
+
+### Champion vs. challenger
+
+`scripts/compare_models.py` scores a candidate and the deployed model on the same test data and promotes the
+candidate only if it is no worse on PR-AUC, recall @ 1 % FPR, analyst workload and latency **and** better on cost
+or PR-AUC. Real run: a deeper XGBoost had higher PR-AUC (0.957 vs 0.955) and lower cost, but caught one fewer
+fraud at 1 % FPR → **rejected, v1 kept**. Details: [docs/model_promotion.md](docs/model_promotion.md).
+
 | Engineering check | Result |
 |---|---|
-| Unit + integration tests | **99 passing** (CI on every push) |
+| Unit + integration tests | **115 passing** (CI on every push) |
 | Training/serving parity (online Redis features vs offline) | identical scores (max diff **0.0**) |
 | Single-event model latency (one row, laptop CPU) | p95 ≈ 15 ms |
 | End-to-end (API → scored) | smoke test passes locally and on EC2 |
@@ -64,6 +85,8 @@ At the *high* threshold, 21 % of flagged test transactions are fraud (75 of 354)
 | Thresholds from analyst capacity (top ~2%) | the review team can actually handle the queue |
 | Alembic migrations as a one-shot job | schema is ready before any service starts |
 | Model monitoring (high-risk rate, score distribution, analyst precision) | a model can be up and fast while silently wrong |
+| Promotion gate: guardrails + required improvement | a new model must be better, not just different; rollback = one env var |
+| Live dashboard reruns only when the alert set changes | new alerts appear within 5 s without wiping an analyst's half-typed note |
 
 ## Run locally
 
@@ -80,12 +103,16 @@ python -m scripts.train_baselines && python -m scripts.train_xgboost && python -
 docker compose up -d --build               # everything: infra, migrations, api, worker, dashboard, monitoring
 python -m scripts.smoke_test               # end-to-end check
 python -m scripts.replay --limit 300 --rate 5
+python -m scripts.replay --skip 11367 --limit 600 --rate 20   # a fraud-heavy slice: watch alerts appear live
+
+python -m scripts.train_xgboost --name xgboost_v2 --max-depth 6            # a challenger
+python -m scripts.compare_models --candidate artifacts/xgboost_v2.joblib   # champion vs. challenger
 ```
 
 | URL | |
 |---|---|
 | http://localhost:8000/docs | API |
-| http://localhost:8501 | analyst review queue |
+| http://localhost:8501 | live analyst review queue + model precision |
 | http://localhost:3000 | Grafana dashboard |
 | http://localhost:9090 | Prometheus (targets, alerts) |
 
@@ -117,15 +144,16 @@ app/
   db/           SQLAlchemy models                   config.py   settings from .env
 alembic/        database migrations                 dashboard/  Streamlit review UI
 scripts/        data, training, replay, smoke test  infra/      Prometheus, alerts, Grafana
-tests/unit/     99 tests                            deploy/     EC2 setup + deploy scripts
-docs/           data contract, alert runbook, AWS deployment guide
+tests/unit/     115 tests                           deploy/     EC2 setup + deploy scripts
+docs/           data contract, model promotion, alert runbook, AWS deployment guide
 ```
 
 ## Limitations and next steps
 
 - **Transactional outbox:** if the API crashes between the DB commit and the Kafka publish, the row
   waits as `received` until the client retries. An outbox poller would publish it automatically.
-- **Retraining loop:** analyst decisions are stored but not yet used to train model v2.
+- **Retraining loop:** analyst decisions are stored and measured per model version, but not yet used to train model v2.
+- **Shadow scoring:** the challenger is compared offline; scoring live traffic with both models side by side would be the next step.
 - **Alerting:** alerts are visible in Prometheus; no Alertmanager (email/Slack) yet.
 - **Scale:** single Kafka broker and single EC2 host; production would use managed services
   (MSK, RDS, ElastiCache) and more than one worker.
