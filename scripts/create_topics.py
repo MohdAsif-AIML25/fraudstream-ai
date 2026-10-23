@@ -3,7 +3,6 @@
 Run from project root:  python -m scripts.create_topics
 Safe to run twice: existing topics are reported, not recreated.
 """
-from re import I
 import sys 
 from confluent_kafka.admin import AdminClient,NewTopic 
 from app.config import get_settings 
