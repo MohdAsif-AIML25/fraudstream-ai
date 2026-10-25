@@ -157,3 +157,7 @@ docs/           data contract, model promotion, alert runbook, AWS deployment gu
 - **Alerting:** alerts are visible in Prometheus; no Alertmanager (email/Slack) yet.
 - **Scale:** single Kafka broker and single EC2 host; production would use managed services
   (MSK, RDS, ElastiCache) and more than one worker.
+
+## License
+
+[MIT](LICENSE) © 2026 Mohammad Asif
