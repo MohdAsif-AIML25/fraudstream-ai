@@ -116,7 +116,7 @@ python -m scripts.compare_models --candidate artifacts/xgboost_v2.joblib   # cha
 | http://localhost:3000 | Grafana dashboard |
 | http://localhost:9090 | Prometheus (targets, alerts) |
 
-Deployment on AWS: see [docs/aws-deployment.md](docs/aws-deployment.md).
+Deployment on AWS: see [docs/aws-deployment.md](docs/aws-deployment.md). Step-by-step checklist (Docker → AWS → after): [docs/execution-checklist.md](docs/execution-checklist.md).
 
 ## Monitoring
 
