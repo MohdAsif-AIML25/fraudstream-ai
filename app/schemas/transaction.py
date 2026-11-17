@@ -42,6 +42,9 @@ class Channel(str, Enum):
     ATM = "atm"
     UPI = "upi"
 
+    CREDIT= "credit" 
+    CASH = "CASH"
+
 
 class Transaction(BaseModel):
     """One transaction event as received from a client or simulator."""

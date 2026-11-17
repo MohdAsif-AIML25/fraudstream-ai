@@ -19,8 +19,8 @@ import numpy as np
 import pandas as pd
 
 CATEGORIES = ["grocery", "electronics", "travel", "food", "fashion", "utilities", "other"]
-CHANNELS = ["upi", "pos", "online", "atm"]
-CHANNEL_WEIGHTS = [0.40, 0.30, 0.25, 0.05]
+CHANNELS = ["upi", "pos", "online", "atm","cash","credit"]
+CHANNEL_WEIGHTS = [0.40, 0.30, 0.25, 0.05,0.15, 0.10]
 MAX_AMOUNT_MINOR = 100_000_000  # same ceiling as the data contract (₹10,00,000)
 MIN_AMOUNT_MINOR = 100          # ₹1
 
