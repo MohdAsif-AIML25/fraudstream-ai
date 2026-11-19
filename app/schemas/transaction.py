@@ -41,9 +41,8 @@ class Channel(str, Enum):
     POS = "pos"   # card swiped at a shop terminal (point of sale)
     ATM = "atm"
     UPI = "upi"
-
     CREDIT= "credit" 
-    CASH = "CASH"
+    CASH = "cash"
 
 
 class Transaction(BaseModel):
