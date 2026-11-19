@@ -2,162 +2,358 @@
 
 ![CI](https://github.com/MohdAsif-AIML25/fraudstream-ai/actions/workflows/ci.yml/badge.svg)
 
-Real-time fraud detection for payment transactions: a FastAPI service accepts transactions,
-Kafka queues them, a scoring worker computes behavioural features from Redis and scores them with
-an XGBoost model, high-risk alerts appear on a **live** analyst dashboard, analyst decisions flow back as
-model evaluation, and Prometheus + Grafana monitor the service, the pipeline **and the model**. A candidate
-model must beat the deployed one through a **champion-vs-challenger gate** before it can be promoted.
-Runs with one command in Docker; deployed on AWS EC2.
+**Real-time fraud detection for payment transactions**, built with FastAPI, Kafka, Redis, PostgreSQL, and XGBoost.
+
+FraudStream AI accepts payment transactions through a FastAPI service, queues events in Kafka, computes behavioural features using Redis, and scores transactions with an XGBoost model. High-risk transactions appear in a live analyst dashboard, where investigation decisions feed back into model evaluation.
+
+Prometheus and Grafana monitor the service, streaming pipeline, and model behaviour. A **champion-vs-challenger promotion gate** ensures a candidate model meets performance guardrails before replacing the deployed model.
+
+Runs locally with one Docker Compose command and is deployed on **AWS EC2**.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    C[Client] -->|POST /transactions| API[FastAPI<br/>validate · store]
-    API -->|save first| PG[(PostgreSQL)]
-    API -->|publish, key=account_id| K[[Kafka 4.3<br/>KRaft]]
-    K --> W[Scoring worker]
-    W <-->|account history| R[(Redis<br/>feature store)]
-    W -->|XGBoost score + band| PG
-    W -->|high risk| RQ[Review queue]
-    RQ -->|live, every 5 s| D[Streamlit<br/>analyst dashboard]
-    D -->|decision = label| API
-    API -->|precision per model version| D
-    API -.metrics.-> P[Prometheus]
-    W -.metrics.-> P
+    C[Client] -->|POST /transactions| API[FastAPI<br/>Validate and store]
+    API -->|Save first| PG[(PostgreSQL)]
+    API -->|Publish<br/>key = account_id| K[[Kafka 4.3<br/>KRaft]]
+    K --> W[Scoring Worker]
+    W <-->|Account history| R[(Redis<br/>Feature Store)]
+    W -->|XGBoost score + risk band| PG
+    W -->|High-risk alerts| RQ[Review Queue]
+    RQ -->|Live updates every 5 seconds| D[Streamlit<br/>Analyst Dashboard]
+    D -->|Analyst decision| API
+    API -->|Precision per model version| D
+    API -.->|Metrics| P[Prometheus]
+    W -.->|Metrics| P
     P --> G[Grafana]
-    K -.bad messages.-> DLQ[[Dead-letter queue]]
+    K -.->|Bad messages| DLQ[[Dead-Letter Queue]]
 ```
 
-**Workflow:** replay transactions → validate (Pydantic contract) → features (Redis) → score (XGBoost) →
-threshold (risk band) → alert (review case) → investigator decision → model evaluation (`GET /reviews/summary`).
+### End-to-end workflow
 
-**Request lifecycle:** `received` → `queued` (API returns **202**) → `scored` (worker) → reviewed (analyst, if high risk).
+Replay transactions → validate using the Pydantic data contract → calculate behavioural features using Redis → score with XGBoost → assign a risk band → create review alerts → record analyst decisions → evaluate model performance.
+
+Model evaluation is available through:
+
+```http
+GET /reviews/summary
+```
+
+### Transaction lifecycle
+
+```text
+received → queued → scored → reviewed
+```
+
+- **received:** Transaction accepted and persisted.
+- **queued:** Transaction published to Kafka; API returns HTTP `202`.
+- **scored:** Worker calculates features and generates a fraud score.
+- **reviewed:** Analyst records a decision for a high-risk transaction.
 
 ## Results
 
-<!-- Source: artifacts_meta/fraud_model_v1.json (deployed model) and mlflow.db (baselines). -->
+The following results are from the synthetic dataset and recorded model experiments.
 
-| Model (chronological split) | Validation avg. precision | Test avg. precision | Test recall @ high band | Traffic flagged (test) |
-|---|---|---|---|---|
+**Source:** `artifacts_meta/fraud_model_v1.json` (deployed model) and `mlflow.db` (baselines).
+
+### Model comparison
+
+| Model (chronological split) | Validation average precision | Test average precision | Test recall at high band | Traffic flagged (test) |
+|---|---:|---:|---:|---:|
 | Rule baseline | 0.269 | — | — | — |
 | Logistic regression | 0.679 | — | — | — |
-| **XGBoost (deployed)** | **0.976** | **0.955** | **100 %** (75 / 75) | **2.4 %** |
+| **XGBoost (deployed)** | **0.976** | **0.955** | **100% (75/75)** | **2.4%** |
 
-Only the selected model is evaluated on the test set, once, after thresholds were frozen on validation.
-At the *high* threshold, 21 % of flagged test transactions are fraud (75 of 354) — the price of catching all of it.
+Only the selected model is evaluated on the test set, once, after thresholds are frozen using validation data.
 
-| Deployed model on the test set (14,845 txns, 75 fraud) | Value |
-|---|---|
-| PR-AUC | 0.955 |
-| Recall at 1 % false-positive rate | 0.987 |
-| Estimated fraud cost (missed fraud + ₹500 chargeback each + ₹50 per review) | ₹17,700 |
-| Fraud amount caught by the review queue | ₹4,82,041 |
-| Model latency, one transaction (laptop CPU) | p95 7–15 ms across runs |
+At the high-risk threshold, 75 of 354 flagged test transactions were fraud, giving approximately **21% precision among flagged transactions**. This threshold catches all 75 fraud cases in the test set.
+
+### Deployed model – Test-set performance
+
+| Metric (14,845 transactions, 75 fraud cases) | Result |
+|---|---:|
+| PR-AUC | **0.955** |
+| Recall at 1% false-positive rate | **0.987** |
+| Estimated fraud cost | **₹17,700** |
+| Fraud amount caught by review queue | **₹4,82,041** |
+| Single-transaction model latency (laptop CPU) | **p95 7–15 ms** |
+
+Estimated fraud cost includes missed fraud, ₹500 per chargeback, and ₹50 per review.
 
 ### Champion vs. challenger
 
-`scripts/compare_models.py` scores a candidate and the deployed model on the same test data and promotes the
-candidate only if it is no worse on PR-AUC, recall @ 1 % FPR, analyst workload and latency **and** better on cost
-or PR-AUC. Real run: a deeper XGBoost had higher PR-AUC (0.957 vs 0.955) and lower cost, but caught one fewer
-fraud at 1 % FPR → **rejected, v1 kept**. Details: [docs/model_promotion.md](docs/model_promotion.md).
+The script `scripts/compare_models.py` evaluates a candidate model against the deployed champion on the same test data.
+
+A candidate is promoted only when it:
+
+- Is no worse on PR-AUC.
+- Is no worse on recall at 1% false-positive rate.
+- Does not increase analyst workload beyond the guardrail.
+- Does not violate the latency guardrail.
+- Improves either estimated cost or PR-AUC.
+
+**Recorded experiment:** A deeper XGBoost challenger achieved higher PR-AUC (0.957 vs. 0.955) and lower estimated cost, but caught one fewer fraud case at 1% FPR. It was rejected, and the deployed `v1` model remained the champion.
+
+Details: [docs/model_promotion.md](docs/model_promotion.md).
+
+### Engineering verification
 
 | Engineering check | Result |
 |---|---|
-| Unit + integration tests | **115 passing** (CI on every push) |
-| Training/serving parity (online Redis features vs offline) | identical scores (max diff **0.0**) |
-| Single-event model latency (one row, laptop CPU) | p95 ≈ 15 ms |
-| End-to-end (API → scored) | smoke test passes locally and on EC2 |
+| Unit and integration tests | **115 passing** |
+| CI | GitHub Actions on every push |
+| Training/serving parity | Identical scores; maximum difference **0.0** |
+| Single-event model latency (laptop CPU) | p95 approximately **15 ms** |
+| End-to-end processing | Smoke test passes locally and on EC2 |
 
-> Data is **synthetic** with injected fraud patterns (card testing, account takeover), so the
-> metrics show the pipeline works; they are not a claim about real-world fraud rates.
+> **Dataset limitation:** The data is synthetic, with injected fraud patterns such as card testing and account takeover. These metrics demonstrate the system's pipeline and evaluation behaviour; they are not claims about real-world fraud rates or production performance.
 
 ## Key design decisions
 
-| Decision | Why |
+| Decision | Reason |
 |---|---|
-| Save to Postgres **before** publishing to Kafka | a Kafka outage cannot lose an accepted transaction; retries republish |
-| Idempotent API (transaction_id = primary key) | client retries never create duplicates |
-| Kafka key = `account_id` | one account's events stay ordered in one partition → correct velocity features |
-| **One** feature function for training and serving | no training/serving skew (proven by a parity test) |
-| Point-in-time features, chronological split | no future data leaks into training |
-| Manual offset commit after processing + DLQ | at-least-once delivery; poison messages don't block the partition |
-| Thresholds from analyst capacity (top ~2%) | the review team can actually handle the queue |
-| Alembic migrations as a one-shot job | schema is ready before any service starts |
-| Model monitoring (high-risk rate, score distribution, analyst precision) | a model can be up and fast while silently wrong |
-| Promotion gate: guardrails + required improvement | a new model must be better, not just different; rollback = one env var |
-| Live dashboard reruns only when the alert set changes | new alerts appear within 5 s without wiping an analyst's half-typed note |
+| Save to PostgreSQL before publishing to Kafka | A Kafka outage does not lose an accepted transaction; retries can republish it. |
+| Idempotent API using `transaction_id` as the primary key | Client retries do not create duplicate transactions. |
+| Kafka message key = `account_id` | Events for an account remain ordered within a partition, supporting correct velocity features. |
+| Shared feature function for training and serving | Prevents training/serving skew; verified through a parity test. |
+| Point-in-time features and chronological data split | Prevents future information from leaking into training. |
+| Manual Kafka offset commit after processing | Supports at-least-once delivery. |
+| Dead-letter queue | Poison messages can be isolated instead of repeatedly blocking a partition. |
+| Thresholds based on analyst capacity | Keeps the review queue within the approximate 2% workload budget. |
+| Alembic migrations as a one-shot job | Ensures the database schema is ready before application services start. |
+| Model monitoring | Tracks high-risk rate, score distribution, and analyst precision to detect silent model degradation. |
+| Champion-vs-challenger promotion gate | Requires measurable improvement while preserving performance guardrails. |
+| Dashboard reruns only when the alert set changes | New alerts appear within five seconds without unnecessarily wiping an analyst's partially written note. |
 
 ## Run locally
 
-Requirements: Docker Desktop, Python 3.12 (only for the scripts).
+### Requirements
+
+- Docker Desktop
+- Python 3.12 (for development and scripts)
+- Git
+
+### 1. Clone the repository
 
 ```bash
-cp .env.example .env                       # then set your own passwords
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements-dev.txt        # runtime + training + tests (the Docker image uses requirements.txt only)
-python -m scripts.generate_dataset         # one-time: data + model (Day 2-3 scripts)
-python -m scripts.build_features
-python -m scripts.train_baselines && python -m scripts.train_xgboost && python -m scripts.select_model
-
-docker compose up -d --build               # everything: infra, migrations, api, worker, dashboard, monitoring
-python -m scripts.smoke_test               # end-to-end check
-python -m scripts.replay --limit 300 --rate 5
-python -m scripts.replay --skip 11367 --limit 600 --rate 20   # a fraud-heavy slice: watch alerts appear live
-
-python -m scripts.train_xgboost --name xgboost_v2 --max-depth 6            # a challenger
-python -m scripts.compare_models --candidate artifacts/xgboost_v2.joblib   # champion vs. challenger
+git clone https://github.com/MohdAsif-AIML25/fraudstream-ai.git
+cd fraudstream-ai
 ```
 
-| URL | |
-|---|---|
-| http://localhost:8000/docs | API |
-| http://localhost:8501 | live analyst review queue + model precision |
-| http://localhost:3000 | Grafana dashboard |
-| http://localhost:9090 | Prometheus (targets, alerts) |
+### 2. Configure environment
 
-Deployment on AWS: see [docs/aws-deployment.md](docs/aws-deployment.md). Step-by-step checklist (Docker → AWS → after): [docs/execution-checklist.md](docs/execution-checklist.md).
+```bash
+cp .env.example .env
+```
+
+Set your own passwords and required environment variables in `.env`.
+
+### 3. Create and activate a Python environment
+
+**Windows PowerShell:**
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+**Linux/macOS:**
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+```
+
+### 4. Install development dependencies
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+The development requirements include runtime, training, and testing dependencies. The Docker application image uses `requirements.txt`.
+
+### 5. Generate data and train models
+
+Run these steps when reproducing the training pipeline:
+
+```bash
+python -m scripts.generate_dataset
+python -m scripts.build_features
+
+python -m scripts.train_baselines
+python -m scripts.train_xgboost
+python -m scripts.select_model
+```
+
+### 6. Start the application
+
+```bash
+docker compose up -d --build
+```
+
+This starts the configured infrastructure, database migrations, API, worker, dashboard, and monitoring services.
+
+### 7. Run the smoke test
+
+```bash
+python -m scripts.smoke_test
+```
+
+### 8. Replay transactions
+
+```bash
+python -m scripts.replay --limit 300 --rate 5
+```
+
+Replay a fraud-heavy slice to observe alerts appearing in the live dashboard:
+
+```bash
+python -m scripts.replay --skip 11367 --limit 600 --rate 20
+```
+
+### 9. Train and evaluate a challenger
+
+Train a candidate model:
+
+```bash
+python -m scripts.train_xgboost --name xgboost_v2 --max-depth 6
+```
+
+Compare it with the deployed champion:
+
+```bash
+python -m scripts.compare_models --candidate artifacts/xgboost_v2.joblib
+```
+
+The candidate is promoted only if it satisfies the configured champion-vs-challenger guardrails.
+
+## Application URLs
+
+| Service | Local URL | Purpose |
+|---|---|---|
+| FastAPI Swagger | [http://localhost:8000/docs](http://localhost:8000/docs) | API documentation and endpoint testing |
+| Streamlit Dashboard | [http://localhost:8501](http://localhost:8501) | Live analyst review queue and model precision |
+| Grafana | [http://localhost:3000](http://localhost:3000) | Monitoring dashboards |
+| Prometheus | [http://localhost:9090](http://localhost:9090) | Metrics, targets, and alerts |
+
+## AWS deployment
+
+FraudStream AI is deployed on **AWS EC2 using Ubuntu and Docker Compose**.
+
+The deployment uses SSH local port forwarding to access application services from the local machine without directly exposing their application ports to the public internet.
+
+The configured local access URLs are:
+
+- FastAPI: `http://localhost:8000/docs`
+- Review dashboard: `http://localhost:8501`
+- Grafana: `http://localhost:3000`
+- Prometheus: `http://localhost:9090`
+
+Deployment instructions:
+
+- [AWS Deployment Guide](docs/aws-deployment.md)
+- [Execution Checklist](docs/execution-checklist.md)
 
 ## Monitoring
 
-Three layers, 12 dashboard panels, 6 alert rules (runbook: [docs/runbook.md](docs/runbook.md)):
+FraudStream AI monitors three layers, with **12 dashboard panels and 6 alert rules**.
 
-- **Service:** up/down, request rate, p95 latency, 5xx rate
-- **Pipeline:** worker throughput, acceptance-to-score time, dead letters
-- **Model:** high-risk rate vs. the 2% budget, score distribution (drift), precision on analyst-reviewed cases
+Runbook: [docs/runbook.md](docs/runbook.md).
 
-<!-- Add screenshots: docs/images/grafana.png, docs/images/review-queue.png -->
+### 1. Service monitoring
+
+- Service availability.
+- API request rate.
+- p95 request latency.
+- HTTP 5xx error rate.
+
+### 2. Pipeline monitoring
+
+- Kafka worker throughput.
+- Transaction acceptance-to-scoring time.
+- Dead-letter queue activity.
+
+### 3. Model monitoring
+
+- High-risk transaction rate against the 2% review budget.
+- Prediction score distribution and drift indicators.
+- Precision on analyst-reviewed transactions.
+
+### Dashboard screenshots
+
+Add deployment screenshots to the repository:
+
+```text
+docs/images/grafana.png
+docs/images/review-queue.png
+```
 
 ## Tech stack
 
-Python 3.12 · FastAPI · Pydantic · SQLAlchemy 2 · Alembic · PostgreSQL · Redis · Kafka 4.3 (KRaft) ·
-XGBoost · scikit-learn · MLflow · Prometheus · Grafana · Streamlit · Docker Compose · GitHub Actions · AWS EC2
+| Category | Technologies |
+|---|---|
+| Language | Python 3.12 |
+| API | FastAPI, Pydantic |
+| Database | PostgreSQL, SQLAlchemy 2, Alembic |
+| Feature store | Redis |
+| Streaming | Apache Kafka 4.3 (KRaft) |
+| Machine learning | XGBoost, scikit-learn |
+| Experiment tracking | MLflow |
+| Monitoring | Prometheus, Grafana |
+| Dashboard | Streamlit |
+| Infrastructure | Docker Compose, AWS EC2 |
+| CI/CD | GitHub Actions |
 
 ## Project structure
 
 ```text
-app/
-  schemas/      data contract (Pydantic)            features/   point-in-time features (offline + Redis)
-  data/         synthetic data generator            models/     training, evaluation, scorer
-  api/          FastAPI: ingest, status, reviews    worker/     Kafka consumer + scoring
-  streaming/    Kafka topics, messages, producer    monitoring/ Prometheus metrics
-  db/           SQLAlchemy models                   config.py   settings from .env
-alembic/        database migrations                 dashboard/  Streamlit review UI
-scripts/        data, training, replay, smoke test  infra/      Prometheus, alerts, Grafana
-tests/unit/     115 tests                           deploy/     EC2 setup + deploy scripts
-docs/           data contract, model promotion, alert runbook, AWS deployment guide
+fraudstream-ai/
+│
+├── app/
+│   ├── schemas/       # Pydantic transaction data contracts
+│   ├── features/      # Point-in-time features: offline and Redis
+│   ├── data/          # Synthetic data generation
+│   ├── models/        # Training, evaluation, and scoring
+│   ├── api/           # FastAPI: ingestion, status, reviews
+│   ├── worker/        # Kafka consumer and scoring worker
+│   ├── streaming/     # Kafka topics, messages, and producer
+│   ├── monitoring/    # Prometheus metrics
+│   ├── db/            # SQLAlchemy database models
+│   └── config.py      # Environment-based configuration
+│
+├── alembic/           # Database migrations
+├── dashboard/         # Streamlit analyst review interface
+├── scripts/           # Data, training, replay, and smoke tests
+├── infra/             # Prometheus, alerts, and Grafana
+├── tests/
+│   └── unit/          # Unit and integration tests
+├── deploy/            # EC2 setup and deployment scripts
+├── docs/
+│   ├── images/        # Project screenshots
+│   ├── aws-deployment.md
+│   ├── execution-checklist.md
+│   ├── model_promotion.md
+│   └── runbook.md
+│
+├── artifacts/         # Trained model artifacts
+├── artifacts_meta/    # Model metadata
+├── docker-compose.yml
+├── requirements.txt
+├── requirements-dev.txt
+└── README.md
 ```
 
 ## Limitations and next steps
 
-- **Transactional outbox:** if the API crashes between the DB commit and the Kafka publish, the row
-  waits as `received` until the client retries. An outbox poller would publish it automatically.
-- **Retraining loop:** analyst decisions are stored and measured per model version, but not yet used to train model v2.
-- **Shadow scoring:** the challenger is compared offline; scoring live traffic with both models side by side would be the next step.
-- **Alerting:** alerts are visible in Prometheus; no Alertmanager (email/Slack) yet.
-- **Scale:** single Kafka broker and single EC2 host; production would use managed services
-  (MSK, RDS, ElastiCache) and more than one worker.
+The project demonstrates a working end-to-end fraud detection pipeline. The following improvements remain:
+
+1. **Transactional outbox:** If the API crashes between the database commit and Kafka publish, the transaction remains in `received` until the client retries. An outbox poller would publish it automatically.
+2. **Retraining loop:** Analyst decisions are stored and evaluated per model version, but are not yet automatically used to train a new model.
+3. **Shadow scoring:** Challenger models are compared offline. Running both champion and challenger against live traffic would provide additional production evaluation.
+4. **Alert delivery:** Alerts are visible in Prometheus, but Alertmanager-based email or Slack notifications are not yet implemented.
+5. **Scalability:** The current deployment uses a single Kafka broker and a single EC2 host. A larger production deployment could use managed services such as Amazon MSK, Amazon RDS, and Amazon ElastiCache, with multiple workers.
 
 ## License
 
-[MIT](LICENSE) © 2026 Mohammad Asif
+[MIT License](LICENSE) © 2026 Mohammad Asif
